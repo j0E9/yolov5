@@ -1,0 +1,314 @@
+import os
+import cv2
+import numpy as np
+import tkinter as tk
+from tkinter import filedialog
+from ultralytics import YOLO
+from skimage import morphology
+import easyocr
+import re
+
+# =========================== CONSTANTS ===========================
+WALL_THICKNESS = 300  # mm
+PLASTERING_THICKNESS = 12  # mm
+
+# =========================== IMAGE SELECTION ===========================
+def select_image(title="Select Floor Plan Image"):
+    root = tk.Tk()
+    root.withdraw()
+    file_path = filedialog.askopenfilename(title=title, filetypes=[("Image Files", ".png;.jpg;.jpeg;.bmp")])
+    return file_path
+
+# Select main image
+new_image_path = select_image("Select  Plan Image")
+if not new_image_path:
+    print("No Plan image selected. Exiting.")
+    exit()
+print(f"Plan Image Selected: {new_image_path}")
+
+# Select not used image
+used_image_path = select_image("Select Section Image ")
+if not used_image_path:
+    print("Section image selected. Continuing without it.")
+else:
+    print(f"Section Image Selected: {used_image_path}")
+
+# =========================== IMAGE PROCESSING ===========================
+def calculate_scale_factor(reference_length_in_pixels, reference_length_in_mm):
+    return reference_length_in_mm / reference_length_in_pixels
+
+# Load trained YOLO model
+model = YOLO(r"E:\datset\EVA0.2\runs\detect\train23\weights\best.pt")
+
+
+new_img = cv2.imread(new_image_path, cv2.IMREAD_GRAYSCALE)
+if new_img is None:
+    print("Error: New Image not loaded.")
+    exit()
+
+# Load the known reference image and its corresponding reference object details
+reference_image_path = r"D:\plan1.png" # Path to the reference image
+reference_length_in_pixels = 112  # Reference object size in pixels in the reference image
+reference_length_in_mm = 800  # Real-world size of the reference object in mm
+
+# Load the reference image
+reference_img = cv2.imread(reference_image_path, cv2.IMREAD_GRAYSCALE)
+if reference_img is None:
+    print("Error: Reference Image not loaded.")
+    exit()
+
+#Calculate the scale factor for the reference image
+scale_factor = calculate_scale_factor(reference_length_in_pixels, reference_length_in_mm)
+
+
+# Load a new image to apply the scale factor
+# Check if file exists
+if not os.path.exists(new_image_path ):
+    raise FileNotFoundError(f"Error: The file '{new_image_path }' does not exist. Check the path!")
+
+# Run YOLO detection
+results = model(new_image_path )
+
+# Count T-junctions with confidence > 0.7
+t_junction_count = sum(1 for result in results for box in result.boxes if box.conf.item() > 0.7)
+
+# ----------------- Total Center Line Length -----------------
+edges = cv2.Canny(new_img, 50, 150, apertureSize=3)
+_, binary_img = cv2.threshold(new_img, 200, 255, cv2.THRESH_BINARY)
+kernel = np.ones((7, 7), np.uint8)
+cleaned_img = cv2.morphologyEx(binary_img, cv2.MORPH_CLOSE, kernel)
+skeleton = morphology.skeletonize(cleaned_img // 255).astype('uint8') * 255
+centerline_length_pixels = cv2.countNonZero(skeleton)
+total_centerline_length_mm = round(centerline_length_pixels * scale_factor, 3)
+
+# ----------------- Extract Room Measurements -----------------
+reader = easyocr.Reader(['en'])
+result = reader.readtext(new_image_path)
+extracted_text = ' '.join([res[1] for res in result])
+measurements = re.findall(r'(\d{3,4})\s?[xX]\s?(\d{3,4})', extracted_text)
+rooms = [(int(w), int(h)) for w, h in measurements]
+
+if rooms:
+    total_width = sum(w for w, _ in rooms) + (len(rooms) - 1) * WALL_THICKNESS
+    total_height = max(h for _, h in rooms) + WALL_THICKNESS
+    total_area_mm2 = total_width * total_height  # Area in mm²
+    total_area_m2 = round(total_area_mm2 / 1e6, 3)  # Convert to m²
+else:
+    print("No measurements found.")
+    exit()
+
+# =========================== MATERIAL CALCULATIONS ===========================
+def calculate_details(area,t_junctions, centerline_length):
+
+
+    # Foundation Factors
+    first_footing_factor = 0.2
+    second_footing_factor = 0.15
+    plinth_factor = 0.1
+    pcc_factor = 0.05
+
+    # Foundation Details
+    first_footing_volume = area * first_footing_factor
+    second_footing_volume = area * second_footing_factor
+    plinth_volume = area * plinth_factor
+    pcc_volume = area * pcc_factor
+    total_foundation_quantity = first_footing_volume + second_footing_volume + plinth_volume + pcc_volume
+
+    cement_footings_plinth = total_foundation_quantity * 403.2
+    sand_footings_plinth = total_foundation_quantity * 672
+    coarse_aggregate_footings_plinth = total_foundation_quantity * 1302
+    water_footings_plinth = total_foundation_quantity * 201.6
+
+    cement_pcc = pcc_volume * 221.76
+    sand_pcc = pcc_volume * 739.2
+    coarse_aggregate_pcc = pcc_volume * 1431.6
+    water_pcc = pcc_volume * 110.88
+
+    # Brickwork Details
+    brickwork_factor = 0.5
+    deductions_factor = 0.1
+    brickwork_volume = area * brickwork_factor
+    total_deductions = brickwork_volume * deductions_factor
+    brickwork_quantity = brickwork_volume - total_deductions
+
+    number_of_bricks = brickwork_quantity * 750
+    cement_brickwork = brickwork_quantity * 82
+    sand_brickwork = brickwork_quantity * 550
+    water_brickwork = brickwork_quantity * 35
+
+    # RC Work Details
+    total_rc_work_volume = total_area_m2 * 0.14
+
+    cement_rc = total_rc_work_volume * 403.2
+    sand_rc = total_rc_work_volume * 672
+    coarse_aggregate_rc = total_rc_work_volume * 1302
+    water_rc = total_rc_work_volume * 201.6
+
+    # Reinforcement Details
+    total_reinforcement = 0.01 * total_rc_work_volume
+    steel_reinforcement = total_reinforcement * 7850
+
+    # Plastering Details
+    outside_area = (0.00291 * centerline_length) - 51.7
+    inside_area = (0.00508 * centerline_length) - 88.55
+    total_surface_area = inside_area + outside_area
+
+    plastering_quantity = 0.012 * total_surface_area
+
+    cement_plastering = plastering_quantity * 273.6
+    sand_plastering = plastering_quantity * 1824
+    water_plastering = plastering_quantity * 200
+
+    # Painting Details
+    door_window_factor = 0.15  # 15% deduction for doors & windows
+    effective_painting_area = (total_surface_area + area) * (1 - door_window_factor)
+
+    # Paint Required (1 liter per 5m²)
+    paint_required = effective_painting_area / 5
+
+    return {
+        "foundation": {
+            "first_footing_volume": first_footing_volume,
+            "second_footing_volume": second_footing_volume,
+            "plinth_volume": plinth_volume,
+            "total_foundation_quantity": total_foundation_quantity,
+            "cement_footings_plinth": cement_footings_plinth,
+            "sand_footings_plinth": sand_footings_plinth,
+            "coarse_aggregate_footings_plinth": coarse_aggregate_footings_plinth,
+            "water_footings_plinth": water_footings_plinth,
+            "cement_pcc": cement_pcc,
+            "sand_pcc": sand_pcc,
+            "coarse_aggregate_pcc": coarse_aggregate_pcc,
+            "water_pcc": water_pcc,
+        },
+        "brickwork": {
+            "brickwork_quantity": brickwork_quantity,
+            "number_of_bricks": number_of_bricks,
+            "cement_brickwork": cement_brickwork,
+            "sand_brickwork": sand_brickwork,
+            "water_brickwork": water_brickwork,
+        },
+        "rc_work": {
+            "total_rc_work_volume": total_rc_work_volume,
+            "cement_rc": cement_rc,
+            "sand_rc": sand_rc,
+            "coarse_aggregate_rc": coarse_aggregate_rc,
+            "water_rc": water_rc,
+        },
+        "reinforcement": {
+            "total_reinforcement": total_reinforcement,
+            "steel_reinforcement": steel_reinforcement,
+        },
+        "plastering": {
+            "total_cement": cement_plastering,
+            "total_sand": sand_plastering,
+            "total_water": water_plastering,
+            "inside_area": inside_area,
+            "outside_area": outside_area,
+            "total_surface_area": total_surface_area,
+            "plastering_quantity": plastering_quantity,
+        },
+        "painting": {
+            "total_painting_area": effective_painting_area,
+            "paint_required": paint_required,
+        },
+    }
+
+def print_details(details):
+    # Initialize total amounts
+    total_cement = 0
+    total_sand = 0
+    total_coarse_aggregate = 0
+    total_water = 0
+    total_steel = 0
+    total_paint = 0
+
+    print(f"\nImage: {new_image_path}")
+    print(f"T-Junctions Detected: {t_junction_count}")
+    print(f"Total Centerline Length: {round(total_centerline_length_mm, 3)} mm")
+
+    print("\nRoom Measurements:")
+    for w, h in rooms:
+        print(f"Width: {round(w, 3)} mm, Height: {round(h, 3)} mm")
+
+    print(f"\nTotal Width (Including Walls): {round(total_width, 3)} mm")
+    print(f"Total Height (Including Walls): {round(total_height, 3)} mm")
+    print(f"Total Area: {round(total_area_m2, 3)} m²")
+
+    print("\n=== Foundation Details ===")
+    print(f"Total Foundation Quantity: {round(total_area_m2 * 0.45, 3)} m³")
+    print(f"Cement for Footings and Plinth: {round(details['foundation']['cement_footings_plinth'], 3)} kg")
+    print(f"Sand for Footings and Plinth: {round(details['foundation']['sand_footings_plinth'], 3)} kg")
+    print(f"Coarse Aggregate for Footings and Plinth: {round(details['foundation']['coarse_aggregate_footings_plinth'], 3)} kg")
+    print(f"Water for Footings and Plinth: {round(details['foundation']['water_footings_plinth'], 3)} L")
+    print(f"Cement for PCC: {round(details['foundation']['cement_pcc'], 3)} kg")
+    print(f"Sand for PCC: {round(details['foundation']['sand_pcc'], 3)} kg")
+    print(f"Coarse Aggregate for PCC: {round(details['foundation']['coarse_aggregate_pcc'], 3)} kg")
+    print(f"Water for PCC: {round(details['foundation']['water_pcc'], 3)} L")
+
+    total_cement += details['foundation']['cement_footings_plinth'] + details['foundation']['cement_pcc']
+    total_sand += details['foundation']['sand_footings_plinth'] + details['foundation']['sand_pcc']
+    total_coarse_aggregate += details['foundation']['coarse_aggregate_footings_plinth'] + details['foundation']['coarse_aggregate_pcc']
+    total_water += details['foundation']['water_footings_plinth'] + details['foundation']['water_pcc']
+
+    print("\n=== Brickwork Details ===")
+    print(f"Brickwork Quantity: {round(details['brickwork']['brickwork_quantity'], 3)} m³")
+    print(f"Number of Bricks: {details['brickwork']['number_of_bricks']}")
+    print(f"Cement for Brickwork: {round(details['brickwork']['cement_brickwork'], 3)} kg")
+    print(f"Sand for Brickwork: {round(details['brickwork']['sand_brickwork'], 3)} kg")
+    print(f"Water for Brickwork: {round(details['brickwork']['water_brickwork'], 3)} L")
+
+    total_cement += details['brickwork']['cement_brickwork']
+    total_sand += details['brickwork']['sand_brickwork']
+    total_water += details['brickwork']['water_brickwork']
+
+    print("\n=== RC Work Details ===")
+    print(f"Total RC Work Volume: {round(details['rc_work']['total_rc_work_volume'], 3)} m³")
+    print(f"Cement for RC Work: {round(details['rc_work']['cement_rc'], 3)} kg")
+    print(f"Sand for RC Work: {round(details['rc_work']['sand_rc'], 3)} kg")
+    print(f"Coarse Aggregate for RC Work: {round(details['rc_work']['coarse_aggregate_rc'], 3)} kg")
+    print(f"Water for RC Work: {round(details['rc_work']['water_rc'], 3)} L")
+
+    total_cement += details['rc_work']['cement_rc']
+    total_sand += details['rc_work']['sand_rc']
+    total_coarse_aggregate += details['rc_work']['coarse_aggregate_rc']
+    total_water += details['rc_work']['water_rc']
+
+    print("\n=== Reinforcement Details ===")
+    print(f"Total Reinforcement Volume: {round(details['reinforcement']['total_reinforcement'], 3)} m³")
+    print(f"Steel for Reinforcement: {round(details['reinforcement']['steel_reinforcement'], 3)} kg")
+
+    total_steel += details['reinforcement']['steel_reinforcement']
+
+    print("\n=== Plastering Details ===")
+    print(f"Total Plastering Volume: {round(details['plastering']['plastering_quantity'], 3)} m³")
+    print(f"Cement for Plastering: {round(details['plastering']['total_cement'], 3)} kg")
+    print(f"Sand for Plastering: {round(details['plastering']['total_sand'], 3)} kg")
+    print(f"Water for Plastering: {round(details['plastering']['total_water'], 3)} L")
+
+
+
+
+
+    total_cement += details['plastering']['total_cement']
+    total_sand += details['plastering']['total_sand']
+    total_water += details['plastering']['total_water']
+
+    print("\n=== Painting Details ===")
+    print(f"Total Painting Area: {round(details['painting']['total_painting_area'], 3)} m²")
+    print(f"Paint Required: {round(details['painting']['paint_required'], 3)} L")
+
+    total_paint += details['painting']['paint_required']
+
+    print("\n=== Total Materials Used ===")
+    print(f"Total Cement Used: {round(total_cement, 3)} kg")
+    print(f"Total Sand Used: {round(total_sand, 3)} kg")
+    print(f"Total Coarse Aggregate Used: {round(total_coarse_aggregate, 3)} kg")
+    print(f"Total Water Used: {round(total_water, 3)} L")
+    print(f"Total Steel Used: {round(total_steel, 3)} kg")
+    print(f"Total Paint Used: {round(total_paint, 3)} L")
+
+
+
+details = calculate_details(total_area_m2, t_junction_count, total_centerline_length_mm)
+print_details(details)
