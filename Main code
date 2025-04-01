@@ -222,6 +222,7 @@ def print_details(details):
     total_water = 0
     total_steel = 0
     total_paint = 0
+    total_bricks = 0
 
     print(f"\nImage: {new_image_path}")
     print(f"T-Junctions Detected: {t_junction_count}")
@@ -237,6 +238,7 @@ def print_details(details):
 
     print("\n=== Foundation Details ===")
     print(f"Total Foundation Quantity: {round(total_area_m2 * 0.45, 3)} m³")
+    print("=== Materials Required For Foundation  ===")
     print(f"Cement for Footings and Plinth: {round(details['foundation']['cement_footings_plinth'], 3)} kg")
     print(f"Sand for Footings and Plinth: {round(details['foundation']['sand_footings_plinth'], 3)} kg")
     print(f"Coarse Aggregate for Footings and Plinth: {round(details['foundation']['coarse_aggregate_footings_plinth'], 3)} kg")
@@ -253,6 +255,7 @@ def print_details(details):
 
     print("\n=== Brickwork Details ===")
     print(f"Brickwork Quantity: {round(details['brickwork']['brickwork_quantity'], 3)} m³")
+    print("=== Materials Required For Brickwork ===")
     print(f"Number of Bricks: {details['brickwork']['number_of_bricks']}")
     print(f"Cement for Brickwork: {round(details['brickwork']['cement_brickwork'], 3)} kg")
     print(f"Sand for Brickwork: {round(details['brickwork']['sand_brickwork'], 3)} kg")
@@ -261,9 +264,11 @@ def print_details(details):
     total_cement += details['brickwork']['cement_brickwork']
     total_sand += details['brickwork']['sand_brickwork']
     total_water += details['brickwork']['water_brickwork']
+    total_bricks += details['brickwork']['number_of_bricks']
 
     print("\n=== RC Work Details ===")
     print(f"Total RC Work Volume: {round(details['rc_work']['total_rc_work_volume'], 3)} m³")
+    print("=== Materials Required For RC Work ===")
     print(f"Cement for RC Work: {round(details['rc_work']['cement_rc'], 3)} kg")
     print(f"Sand for RC Work: {round(details['rc_work']['sand_rc'], 3)} kg")
     print(f"Coarse Aggregate for RC Work: {round(details['rc_work']['coarse_aggregate_rc'], 3)} kg")
@@ -276,19 +281,17 @@ def print_details(details):
 
     print("\n=== Reinforcement Details ===")
     print(f"Total Reinforcement Volume: {round(details['reinforcement']['total_reinforcement'], 3)} m³")
+    print("=== Materials Required For Reinforcement ===")
     print(f"Steel for Reinforcement: {round(details['reinforcement']['steel_reinforcement'], 3)} kg")
 
     total_steel += details['reinforcement']['steel_reinforcement']
 
     print("\n=== Plastering Details ===")
     print(f"Total Plastering Volume: {round(details['plastering']['plastering_quantity'], 3)} m³")
+    print("=== Materials Required For Plastering ===")
     print(f"Cement for Plastering: {round(details['plastering']['total_cement'], 3)} kg")
     print(f"Sand for Plastering: {round(details['plastering']['total_sand'], 3)} kg")
     print(f"Water for Plastering: {round(details['plastering']['total_water'], 3)} L")
-
-
-
-
 
     total_cement += details['plastering']['total_cement']
     total_sand += details['plastering']['total_sand']
@@ -296,19 +299,107 @@ def print_details(details):
 
     print("\n=== Painting Details ===")
     print(f"Total Painting Area: {round(details['painting']['total_painting_area'], 3)} m²")
+    print("=== Materials Required For Painting ===")
     print(f"Paint Required: {round(details['painting']['paint_required'], 3)} L")
 
     total_paint += details['painting']['paint_required']
 
+    total_cement = total_cement/50
     print("\n=== Total Materials Used ===")
-    print(f"Total Cement Used: {round(total_cement, 3)} kg")
+    print(f"Total Cement Used: {round(total_cement)} bags")
     print(f"Total Sand Used: {round(total_sand, 3)} kg")
     print(f"Total Coarse Aggregate Used: {round(total_coarse_aggregate, 3)} kg")
     print(f"Total Water Used: {round(total_water, 3)} L")
     print(f"Total Steel Used: {round(total_steel, 3)} kg")
+    print(f"Total Bricks Used: {round(total_bricks)} units")
     print(f"Total Paint Used: {round(total_paint, 3)} L")
 
+    # Call cost calculation function
+    calculate_cost(total_cement, total_sand, total_coarse_aggregate, total_steel, total_bricks, total_paint,total_water)
 
+
+
+def select_material(prompt, options):
+    """Function to allow user to select a material from given options."""
+    print(f"\n{prompt}")
+    print ("price is per kg and price of brick is per units ")
+    for i, (name, price) in enumerate(options.items(), start=1):
+        print(f"{i}. {name} - Rs{price}")
+
+    choice = int(input("Enter your choice (1/2/3): ")) - 1
+    selected_item = list(options.keys())[choice]
+    selected_price = options[selected_item]
+
+    return selected_item, selected_price
+
+def calculate_cost(total_cement,total_coarse_aggregate,total_steel,total_sand,total_bricks,total_paint,total_water):
+    # Material Rates (Rs per unit)
+    cement_rates = {
+        "Ultratech": 350,  # Rs per kg (50 kg bag)
+        "Ramco": 340,
+        "Chettinad": 320
+    }
+
+    sand_rates = {
+        "River Sand": 3.00,  # Rs per kg
+        "M Sand": 2.75,
+        "Robo Sand": 2.20
+    }
+
+    coarse_aggregate_rates = {
+        "Type 1": 1.90,  # Rs per kg
+        "Type 2": 1.50,
+        "Type 3": 1.40
+    }
+
+    steel_rates = {
+        "TATA Steel": 64,  # Rs per kg
+        "SAIL Steel": 60,
+        "Kirali Steel": 54
+    }
+
+    brick_rates = {
+        "1st Class": 12,  # Rs per brick
+        "2nd Class": 10,
+        "Laterite Stone": 8.5
+    }
+
+    paint_rates = {
+        "Asian Paints": 225,  # Rs per liter
+        "Nerolac": 200,
+        "Indigo": 150
+    }
+
+    # Get user selection for each material
+    selected_cement, cement_price = select_material("Select Cement Brand:", cement_rates)
+    selected_sand, sand_price = select_material("Select Sand Type:", sand_rates)
+    selected_coarse_aggregate, coarse_aggregate_price = select_material("Select Coarse Aggregate Type:", coarse_aggregate_rates)
+    selected_steel, steel_price = select_material("Select Steel Brand:", steel_rates)
+    selected_brick, brick_price = select_material("Select Brick Type:", brick_rates)
+    selected_paint, paint_price = select_material("Select Paint Brand:", paint_rates)
+
+    # Calculate total cost
+    cost_cement = total_cement * cement_price
+    cost_sand = total_sand * sand_price
+    cost_coarse_aggregate = total_coarse_aggregate * coarse_aggregate_price
+    cost_steel = total_steel * steel_price
+    cost_bricks = total_bricks * brick_price
+    cost_paint = total_paint * paint_price
+
+    total_cost = cost_cement + cost_sand + cost_coarse_aggregate + cost_steel + cost_bricks + cost_paint
+
+    # Display results
+    print("\n=== Total Materials Used ===")
+    print(f"Total Cement Used: {round(total_cement)} bags ({selected_cement}) - Rs{round(cost_cement, 2)}")
+    print(f"Total Sand Used: {round(total_sand, 3)} kg ({selected_sand}) - Rs{round(cost_sand, 2)}")
+    print(f"Total Coarse Aggregate Used: {round(total_coarse_aggregate, 3)} kg ({selected_coarse_aggregate}) - Rs{round(cost_coarse_aggregate, 2)}")
+    print(f"Total Water Used: {round(total_water, 3)} L (Not charged)")
+    print(f"Total Steel Used: {round(total_steel, 3)} kg ({selected_steel}) - Rs{round(cost_steel, 2)}")
+    print(f"Total Bricks Used: {total_bricks} units ({selected_brick}) - Rs{round(cost_bricks, 2)}")
+    print(f"Total Paint Used: {round(total_paint, 3)} L ({selected_paint}) - Rs{round(cost_paint, 2)}")
+
+    print("\n=== Total Cost ===")
+    print(f"Grand Total: Rs{round(total_cost, 2)}")
 
 details = calculate_details(total_area_m2, t_junction_count, total_centerline_length_mm)
 print_details(details)
