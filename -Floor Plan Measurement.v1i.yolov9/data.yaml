@@ -1,0 +1,13 @@
+train: E:/-Floor Plan Measurement.v1i.yolov9/train/images
+val: E:/-Floor Plan Measurement.v1i.yolov9/valid/images
+test: E:/-Floor Plan Measurement.v1i.yolov9/test/images
+
+nc: 1
+names: ['Measurement']
+
+roboflow:
+  workspace: civil-f1opg
+  project: -floor-plan-measurement
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/civil-f1opg/-floor-plan-measurement/dataset/1
